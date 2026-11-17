@@ -15,7 +15,7 @@ import {
   ensureListener,
   supabase,
 } from "./lib/cloud";
-import { demoAdvert, demoArtists, demoTracks } from "./lib/demo";
+import { demoAdvert, demoArtists, demoTracks } from "@catalogue";
 import { deleteFile, getFileURL, readLocal, writeLocal } from "./lib/storage";
 import type {
   Advert,
@@ -44,6 +44,7 @@ function useMusicState() {
   );
   const [loading, setLoading] = useState(true);
   const [catalogError, setCatalogError] = useState("");
+  const [backendSetupNeeded, setBackendSetupNeeded] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [favourites, setFavourites] = useState<string[]>(
@@ -62,6 +63,7 @@ function useMusicState() {
   const [clock, setClock] = useState(Date.now());
   const [toast, setToast] = useState("");
   const [authOpen, setAuthOpen] = useState(false);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
   const [adOpen, setAdOpen] = useState(false);
   const [current, setCurrent] = useState<Track | null>(null);
@@ -108,6 +110,7 @@ function useMusicState() {
   async function refresh() {
     if (!tracks.length) setLoading(true);
     setCatalogError("");
+    setBackendSetupNeeded(false);
     try {
       if (cloudMode) {
         if (configError)
@@ -165,6 +168,7 @@ function useMusicState() {
         ]);
       }
     } catch (e) {
+      setBackendSetupNeeded(e instanceof APIError && e.status === 404);
       setCatalogError(
         e instanceof Error ? e.message : "Could not load the music library.",
       );
@@ -215,8 +219,12 @@ function useMusicState() {
     if (!supabase) return;
     void supabase.auth
       .getSession()
-      .then(({ data }) => loadUserData(data.session?.user ?? null));
-    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      .then(({ data }) => loadUserData(data.session?.user ?? null))
+      .catch(() =>
+        notify("Your saved session could not be restored. Sign in again."),
+      );
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY") setRecoveryOpen(true);
       setTimeout(() => {
         void loadUserData(session?.user ?? null);
       }, 0);
@@ -655,7 +663,7 @@ function useMusicState() {
           id: crypto.randomUUID(),
           name: t.artist.trim(),
           bio: "An independent voice on Horicx Music.",
-          cover: "/art/artist-0.svg",
+          cover: "/art/artist-placeholder.svg",
         };
         save("artists", [...readLocal<Artist[]>("artists", []), artist]);
       }
@@ -681,7 +689,7 @@ function useMusicState() {
                   ...t,
                   audio: undefined,
                   cover: t.cover.startsWith("blob:")
-                    ? "/art/after-hours.svg"
+                    ? "/art/cover-placeholder.svg"
                     : t.cover,
                 }
               : x,
@@ -813,6 +821,7 @@ function useMusicState() {
     adverts,
     loading,
     catalogError,
+    backendSetupNeeded,
     refresh,
     user,
     isAdmin,
@@ -823,6 +832,8 @@ function useMusicState() {
     notify,
     authOpen,
     setAuthOpen,
+    recoveryOpen,
+    setRecoveryOpen,
     queueOpen,
     setQueueOpen,
     adOpen,

@@ -359,7 +359,10 @@ export function Admin() {
             {(tab === "Artists" ? m.artists : m.albums).map((item) => (
               <div className="entity-row" key={item.id}>
                 {"name" in item ? (
-                  <img src={item.cover || "/art/artist-0.svg"} alt="" />
+                  <img
+                    src={item.cover || "/art/artist-placeholder.svg"}
+                    alt=""
+                  />
                 ) : (
                   <div className="entity-icon">
                     <Disc3 size={24} />
@@ -770,7 +773,7 @@ function SongForm({ track, onClose }: { track?: Track; onClose: () => void }) {
               id: crypto.randomUUID(),
               name: artist.trim(),
               bio: "An independent voice on Horicx Music.",
-              cover: "/art/artist-0.svg",
+              cover: "/art/artist-placeholder.svg",
             };
             writeLocal("artists", [...readLocal<Artist[]>("artists", []), a]);
           }
@@ -797,7 +800,7 @@ function SongForm({ track, onClose }: { track?: Track; onClose: () => void }) {
             album_id: al?.id,
             genre,
             duration,
-            cover: "/art/after-hours.svg",
+            cover: "/art/cover-placeholder.svg",
             description,
             release_date: date,
             published,
@@ -1136,7 +1139,7 @@ function EntityForm({
                     id: item?.id ?? crypto.randomUUID(),
                     name: name.trim(),
                     bio,
-                    cover: "/art/artist-0.svg",
+                    cover: "/art/artist-placeholder.svg",
                   }
                 : {
                     id: item?.id ?? crypto.randomUUID(),

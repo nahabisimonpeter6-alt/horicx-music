@@ -1,7 +1,8 @@
 import { createClient, type User } from "npm:@supabase/supabase-js@2.100.0";
 const service = createClient(
   Deno.env.get("SUPABASE_URL")!,
-  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  (Deno.env.get("SUPABASE_SECRET_KEY") ??
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"))!,
   { auth: { persistSession: false, autoRefreshToken: false } },
 );
 const allowed = (Deno.env.get("ALLOWED_ORIGINS") ?? "http://localhost:5173")
@@ -132,7 +133,7 @@ async function catalogue(includeDrafts = false) {
         album: one(albums)?.title ?? "Single",
         cover: one(track_media)?.cover_path
           ? await signed("covers", one(track_media)!.cover_path, 3600)
-          : "/art/after-hours.svg",
+          : "/art/cover-placeholder.svg",
       };
     }),
   );
@@ -315,7 +316,7 @@ async function handle(req: Request) {
       throw new HttpError(400, "Invalid JSON request.");
     });
   const action = required(body.action, 50);
-  if (action === "catalog") {
+  if (action === "catalog" || action === "status") {
     const address =
       req.headers.get("cf-connecting-ip") ??
       req.headers.get("x-forwarded-for")?.split(",")[0] ??
@@ -328,6 +329,39 @@ async function handle(req: Request) {
       .map((x) => x.toString(16).padStart(2, "0"))
       .join("");
     await limit(`catalog:${hash}`, 90);
+    if (action === "status") {
+      const [tracks, adverts, settings, playlistSchema, followSchema] =
+        await Promise.all([
+          service
+            .from("tracks")
+            .select("id,track_media!inner(track_id)", {
+              count: "exact",
+              head: true,
+            })
+            .eq("published", true),
+          service
+            .from("adverts")
+            .select("id,advert_media!inner(advert_id)", {
+              count: "exact",
+              head: true,
+            })
+            .eq("active", true),
+          service.from("settings").select("listening_minutes").single(),
+          service.from("playlists").select("description").limit(1),
+          service.from("artist_follows").select("user_id").limit(1),
+        ]);
+      check(tracks);
+      check(adverts);
+      check(playlistSchema);
+      check(followSchema);
+      const configured = rows(settings);
+      return {
+        database: true,
+        tracks: tracks.count ?? 0,
+        activeAdverts: adverts.count ?? 0,
+        listeningMinutes: configured.listening_minutes,
+      };
+    }
     const [tracks, artists, albums, settings] = await Promise.all([
       catalogue(),
       service.from("artists").select("*").order("name"),
@@ -338,7 +372,7 @@ async function handle(req: Request) {
       tracks,
       artists: rows(artists).map((a, i) => ({
         ...a,
-        cover: `/art/artist-${i % 6}.svg`,
+        cover: "/art/artist-placeholder.svg",
       })),
       albums: rows(albums),
       minutes: rows(settings).listening_minutes,
@@ -678,6 +712,25 @@ async function handle(req: Request) {
       );
     }
     return { ok: true };
+  }
+  if (action === "admin_health") {
+    const [buckets, schema] = await Promise.all([
+      service.storage.listBuckets(),
+      service.from("artist_follows").select("user_id").limit(1),
+    ]);
+    check(schema);
+    const all = rows(buckets);
+    const names = ["music", "covers", "adverts"];
+    if (
+      !names.every((name) =>
+        all.some((b) => b.id === name && b.public === false),
+      )
+    )
+      throw new HttpError(
+        503,
+        "Private storage is not configured correctly. Keep all three media buckets private.",
+      );
+    return { database: "ok", storage: "private", buckets: names };
   }
   if (action === "admin_overview") {
     const [tracks, ads, songs, users, plays, completions] = await Promise.all([

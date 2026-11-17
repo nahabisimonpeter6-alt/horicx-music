@@ -21,6 +21,29 @@ globalThis.fetch = ((input: RequestInfo | URL) => {
         headers: { "Content-Type": "application/json" },
       }),
     );
+  if (scenario === "status") {
+    if (
+      ["/rest/v1/playlists", "/rest/v1/artist_follows"].includes(url.pathname)
+    )
+      return json([]);
+    if (
+      url.pathname === "/rest/v1/tracks" ||
+      url.pathname === "/rest/v1/adverts"
+    )
+      return Promise.resolve(
+        new Response("null", {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            "Content-Range": url.pathname.endsWith("tracks")
+              ? "0-1/2"
+              : "0-0/1",
+          },
+        }),
+      );
+    if (url.pathname === "/rest/v1/settings")
+      return json({ listening_minutes: 30 });
+  }
   if (url.pathname === "/auth/v1/user")
     return scenario === "invalid"
       ? json({ message: "Invalid JWT" }, 401)
@@ -221,6 +244,34 @@ Deno.test(
       }),
     );
     assert.equal(r.status, 404);
+    await r.body?.cancel();
+  },
+);
+Deno.test(
+  "public launch status reports actual database counts without requiring an account",
+  async () => {
+    scenario = "status";
+    try {
+      const r = await handler(request("status"));
+      assert.equal(r.status, 200);
+      assert.deepEqual(await r.json(), {
+        database: true,
+        tracks: 2,
+        activeAdverts: 1,
+        listeningMinutes: 30,
+      });
+    } finally {
+      scenario = "listener";
+    }
+  },
+);
+Deno.test(
+  "ordinary listeners cannot inspect administrator storage health",
+  async () => {
+    const r = await handler(
+      request("admin_health", { token: "listener-fixture" }),
+    );
+    assert.equal(r.status, 403);
     await r.body?.cancel();
   },
 );

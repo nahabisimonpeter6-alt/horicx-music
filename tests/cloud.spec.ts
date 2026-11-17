@@ -28,7 +28,7 @@ test("cloud visitors must sign in before creating a playlist", async ({
   page,
 }) => {
   await page.goto("/");
-  await expect(page.locator(".mode-badge")).toHaveText("Cloud mode");
+  await expect(page.locator(".mode-badge")).toHaveText("Private cloud");
   await page
     .locator(".sidebar")
     .getByRole("button", { name: "Create playlist", exact: true })
@@ -130,4 +130,57 @@ test("following an artist in cloud mode requires a registered account", async ({
   expect(
     await page.evaluate(() => localStorage.getItem("horicx:followed-artists")),
   ).toBeNull();
+});
+
+test("password recovery uses real Auth endpoints and reports a neutral confirmation", async ({
+  page,
+}) => {
+  let requested = false;
+  await page.route(
+    "https://horicx-test.supabase.co/auth/v1/recover*",
+    async (route) => {
+      requested = true;
+      expect(route.request().postDataJSON().email).toBe(
+        "listener@example.test",
+      );
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: "{}",
+      });
+    },
+  );
+  await page.goto("/");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByLabel("Email address").fill("listener@example.test");
+  await page
+    .getByRole("button", { name: "Forgot your password?", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toContainText(
+    "If an account exists for this email",
+  );
+  expect(requested).toBe(true);
+});
+test("an empty real catalogue stays empty instead of loading samples", async ({
+  page,
+}) => {
+  await page.route(
+    "https://horicx-test.supabase.co/functions/v1/music-api",
+    (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          tracks: [],
+          artists: [],
+          albums: [],
+          minutes: 30,
+        }),
+      }),
+  );
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "Good music is on its way." }),
+  ).toBeVisible();
+  await expect(page.locator(".track-card")).toHaveCount(0);
 });

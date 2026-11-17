@@ -10,7 +10,10 @@
     "test": "playwright test",
     "generate:media": "python3 scripts/generate-media.py",
     "seed:cloud": "node scripts/seed-cloud.mjs",
-    "test:security": "node tests/security.mjs"
+    "test:security": "node tests/security.mjs",
+    "dev:demo": "node scripts/run-demo.mjs",
+    "setup:admin": "node scripts/provision-admin.mjs",
+    "check:production": "node scripts/check-production.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.100.0",

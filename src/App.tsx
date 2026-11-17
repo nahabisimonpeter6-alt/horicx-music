@@ -31,11 +31,18 @@ import {
   WifiOff,
   X,
 } from "lucide-react";
-import { cloudMode } from "./lib/cloud";
+import { cloudMode, configError } from "./lib/cloud";
+import { CloudSetup } from "./components/CloudSetup";
+import { EmptyCatalogue } from "./components/EmptyCatalogue";
 import { useMusic, formatTime } from "./store";
 import type { Track } from "./lib/types";
 import { Player } from "./components/Player";
-import { AdModal, AuthModal, Modal } from "./components/Modals";
+import {
+  AdModal,
+  AuthModal,
+  Modal,
+  PasswordRecoveryModal,
+} from "./components/Modals";
 import { Admin } from "./components/Admin";
 import { DiscoveryShelf, MixPage } from "./components/Discovery";
 import {
@@ -75,7 +82,7 @@ export function TrackCard({ track }: { track: Track }) {
         >
           <img
             src={track.cover}
-            alt={`${track.title} original cover artwork`}
+            alt={`${track.title} cover artwork`}
             loading="lazy"
           />
         </button>
@@ -329,6 +336,7 @@ function HomePage() {
     filter === "For you"
       ? published
       : published.filter((t) => t.genre === filter);
+  if (cloudMode && !published.length) return <EmptyCatalogue />;
   return (
     <>
       <div className="page-intro">
@@ -537,7 +545,7 @@ function HomePage() {
                     key={a.id}
                   >
                     <img
-                      src={a.cover || "/art/artist-0.svg"}
+                      src={a.cover || "/art/artist-placeholder.svg"}
                       alt={`${a.name} original illustrated portrait`}
                     />
                     <strong>{a.name}</strong>
@@ -851,7 +859,10 @@ function LibraryPage({
                       key={a.id}
                       onClick={() => navigate(`/artist/${a.id}`)}
                     >
-                      <img src={a.cover || "/art/artist-0.svg"} alt="" />
+                      <img
+                        src={a.cover || "/art/artist-placeholder.svg"}
+                        alt=""
+                      />
                       <strong>{a.name}</strong>
                       <span>Following</span>
                     </button>
@@ -898,7 +909,11 @@ function DetailPage({ route }: { route: string }) {
     <>
       <div className={`detail-hero ${isArtist ? "artist-detail" : ""}`}>
         <img
-          src={isArtist ? artist!.cover || "/art/artist-0.svg" : track!.cover}
+          src={
+            isArtist
+              ? artist!.cover || "/art/artist-placeholder.svg"
+              : track!.cover
+          }
           alt={isArtist ? artist!.name : track!.title}
         />
         <div>
@@ -1046,6 +1061,13 @@ export default function App() {
     { path: "/genres", title: "Browse genres", icon: LayoutGrid },
     { path: "/artists", title: "Artists", icon: Users },
   ];
+  if (configError || m.backendSetupNeeded)
+    return (
+      <CloudSetup
+        backendPending={m.backendSetupNeeded}
+        onRetry={() => void m.refresh()}
+      />
+    );
   return (
     <div className="app-shell">
       <a
@@ -1226,7 +1248,7 @@ export default function App() {
           <div className="header-right">
             <span className="mode-badge">
               <span className="live-dot" />
-              {cloudMode ? "Cloud mode" : "Demo mode"}
+              {cloudMode ? "Private cloud" : "Local preview"}
             </span>
             <span className="header-separator" />
             {m.user && !m.user.is_anonymous ? (
@@ -1315,7 +1337,7 @@ export default function App() {
                     key={a.id}
                   >
                     <img
-                      src={a.cover || "/art/artist-0.svg"}
+                      src={a.cover || "/art/artist-placeholder.svg"}
                       alt={`Illustration for ${a.name}`}
                     />
                     <h2>{a.name}</h2>
@@ -1389,7 +1411,8 @@ export default function App() {
           </button>
         </div>
       )}
-      {m.authOpen && <AuthModal />}
+      {m.authOpen && !m.recoveryOpen && <AuthModal />}
+      {m.recoveryOpen && <PasswordRecoveryModal />}
       {m.adOpen && <AdModal />}
       {newPlaylist && (
         <Modal

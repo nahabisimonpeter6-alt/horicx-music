@@ -15,10 +15,10 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "npm run dev",
+      command: "node scripts/run-demo.mjs --port 5173 --strictPort",
       url: "http://127.0.0.1:5173",
       reuseExistingServer: true,
-      timeout: 30000,
+      timeout: 60000,
     },
     {
       command: "npx vite --host 127.0.0.1 --port 5174 --strictPort",
@@ -28,7 +28,13 @@ export default defineConfig({
         VITE_SUPABASE_URL: "https://horicx-test.supabase.co",
         VITE_SUPABASE_ANON_KEY: "fixture-public-key",
       },
-      timeout: 30000,
+      timeout: 60000,
+    },
+    {
+      command: "npm run build && npm run preview -- --port 5175 --strictPort",
+      url: "http://127.0.0.1:5175",
+      reuseExistingServer: false,
+      timeout: 60000,
     },
   ],
 });

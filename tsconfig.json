@@ -12,7 +12,10 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "strict": true,
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    "paths": {
+      "@catalogue": ["./src/lib/demo.ts"]
+    }
   },
   "include": ["src", "vite.config.ts"]
 }

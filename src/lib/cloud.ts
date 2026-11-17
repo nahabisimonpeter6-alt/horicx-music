@@ -1,11 +1,12 @@
 import { createClient } from "@supabase/supabase-js";
-const url = import.meta.env.VITE_SUPABASE_URL?.trim();
-const key = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
-export const configError =
-  !!(url || key) && (!url || !key || !/^https:\/\/.+/.test(url));
-export const cloudMode = !!(url || key);
+import { configuration, demoMode } from "./app-config";
+export { demoMode };
+export const cloudMode = !demoMode;
+const { url, key } = configuration;
+export const configError = cloudMode && configuration.issue !== null;
+export const configurationIssue = configuration.issue;
 export const supabase =
-  !configError && url && key ? createClient(url, key) : null;
+  cloudMode && !configError ? createClient(url, key) : null;
 export class APIError extends Error {
   status: number;
   constructor(message: string, status: number) {
@@ -37,11 +38,19 @@ export async function api<T = Record<string, unknown>>(
   const result = await response
     .json()
     .catch(() => ({ error: "The server returned an unreadable response." }));
-  if (!response.ok)
+  if (!response.ok) {
+    const message =
+      typeof result.error === "string"
+        ? result.error
+        : (result.error?.message ?? result.message);
     throw new APIError(
-      result.error ?? "The request failed. Please try again.",
+      message ??
+        (response.status === 404
+          ? "The music API has not been deployed for this project."
+          : "The request failed. Please try again."),
       response.status,
     );
+  }
   return result as T;
 }
 export async function ensureListener() {

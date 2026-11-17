@@ -1,7 +1,9 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { MusicProvider } from "./store";
-import App from "./App";
+import { CloudSetup } from "./components/CloudSetup";
+import { configuration, demoMode } from "./lib/app-config";
+const ConnectedApp = React.lazy(() => import("./ConnectedApp"));
+const needsSetup = !demoMode && configuration.issue !== null;
 import "./styles.css";
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -29,9 +31,20 @@ class ErrorBoundary extends React.Component<
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ErrorBoundary>
-      <MusicProvider>
-        <App />
-      </MusicProvider>
+      {needsSetup ? (
+        <CloudSetup />
+      ) : (
+        <React.Suspense
+          fallback={
+            <div className="app-loading" role="status">
+              <span />
+              Opening your music library…
+            </div>
+          }
+        >
+          <ConnectedApp />
+        </React.Suspense>
+      )}
     </ErrorBoundary>
   </React.StrictMode>,
 );

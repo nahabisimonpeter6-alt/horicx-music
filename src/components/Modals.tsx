@@ -134,6 +134,29 @@ export function AuthModal() {
       setBusy(false);
     }
   }
+  async function resetPassword() {
+    if (!supabase) return;
+    if (!email.trim() || !email.includes("@")) {
+      setError("Enter your email address above to request a reset link.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(
+        email.trim(),
+        { redirectTo: location.origin },
+      );
+      if (error) throw error;
+      setMessage(
+        "If an account exists for this email, a password reset link will be sent.",
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <Modal
       title={
@@ -208,6 +231,16 @@ export function AuthModal() {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="At least 8 characters"
               />
+              {!signup && (
+                <button
+                  className="password-reset-link"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void resetPassword()}
+                >
+                  Forgot your password?
+                </button>
+              )}
               {error && (
                 <p role="alert" className="form-error">
                   {error}
@@ -492,6 +525,87 @@ export function AdModal() {
           security.
         </p>
       )}
+    </Modal>
+  );
+}
+
+export function PasswordRecoveryModal() {
+  const m = useMusic();
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return (
+    <Modal
+      title="A fresh start for your account."
+      onClose={() => m.setRecoveryOpen(false)}
+    >
+      <p className="modal-subtitle">
+        Choose a new password for your verified account.
+      </p>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setError("");
+          if (password !== confirmation) {
+            setError("The passwords do not match.");
+            return;
+          }
+          if (!supabase) {
+            setError(
+              "Your session could not be restored. Request a new password reset link.",
+            );
+            return;
+          }
+          setBusy(true);
+          try {
+            const { error } = await supabase.auth.updateUser({ password });
+            if (error) throw error;
+            m.setRecoveryOpen(false);
+            m.notify("Your password has been updated.");
+          } catch (e) {
+            setError((e as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <label className="field-label" htmlFor="new-password">
+          New password
+        </label>
+        <input
+          className="form-input"
+          id="new-password"
+          type="password"
+          autoComplete="new-password"
+          minLength={8}
+          required
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+        <label className="field-label" htmlFor="confirm-password">
+          Confirm password
+        </label>
+        <input
+          className="form-input"
+          id="confirm-password"
+          type="password"
+          autoComplete="new-password"
+          minLength={8}
+          required
+          value={confirmation}
+          onChange={(e) => setConfirmation(e.target.value)}
+        />
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+        <button className="button lime full-width" disabled={busy}>
+          {busy ? <Loader2 className="spin" size={17} /> : null}Save new
+          password
+        </button>
+      </form>
     </Modal>
   );
 }
