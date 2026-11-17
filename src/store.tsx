@@ -55,6 +55,11 @@ function useMusicState() {
   const [recent, setRecent] = useState<string[]>(
     cloudMode ? [] : () => readLocal("recent", []),
   );
+  const [followedArtists, setFollowedArtists] = useState<string[]>(
+    cloudMode ? [] : () => readLocal("followed-artists", []),
+  );
+  const [sleepTimer, setSleepTimer] = useState<number | "track" | null>(null);
+  const [clock, setClock] = useState(Date.now());
   const [toast, setToast] = useState("");
   const [authOpen, setAuthOpen] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
@@ -173,6 +178,7 @@ function useMusicState() {
     setFavourites([]);
     setPlaylists([]);
     setRecent([]);
+    setFollowedArtists([]);
     setIsAdmin(false);
     if (!u) return;
     try {
@@ -181,12 +187,14 @@ function useMusicState() {
         favourites: string[];
         playlists: Playlist[];
         recent: string[];
+        followedArtists?: string[];
         passUntil: number;
       }>("library");
       setIsAdmin(data.admin);
       setFavourites(data.favourites);
       setPlaylists(data.playlists);
       setRecent(data.recent);
+      setFollowedArtists(data.followedArtists ?? []);
       setPassUntil(data.passUntil);
       if (data.admin) {
         const a = await api<{
@@ -251,6 +259,7 @@ function useMusicState() {
   }, []);
   useEffect(() => {
     const t = setInterval(() => {
+      setClock(Date.now());
       if (passRef.current > 0 && passRef.current <= Date.now()) {
         audio.current?.pause();
         setPassUntil(0);
@@ -261,6 +270,34 @@ function useMusicState() {
     }, 1000);
     return () => clearInterval(t);
   }, []);
+  useEffect(() => {
+    if (typeof sleepTimer === "number" && clock >= sleepTimer) {
+      ++request.current;
+      pending.current = null;
+      audio.current?.pause();
+      setPlaying(false);
+      setBuffering(false);
+      setSleepTimer(null);
+      setAdOpen(false);
+      notify("Sleep timer finished. Your music is paused.");
+    }
+  }, [clock, sleepTimer]);
+  function setSleep(minutes: number | "track" | null) {
+    setSleepTimer(
+      minutes === "track"
+        ? "track"
+        : minutes === null
+          ? null
+          : Date.now() + minutes * 60000,
+    );
+    notify(
+      minutes === null
+        ? "Sleep timer cancelled."
+        : minutes === "track"
+          ? "Music will stop at the end of this track."
+          : `Sleep timer set for ${minutes} minutes.`,
+    );
+  }
   async function play(track: Track) {
     pending.current = track;
     setPlayError("");
@@ -352,16 +389,21 @@ function useMusicState() {
     }
     if (!target) {
       const i = published.findIndex((t) => t.id === current?.id);
+      const choices = published.filter((t) => t.id !== current?.id);
       target =
-        published[
-          shuffle
-            ? Math.floor(Math.random() * published.length)
-            : (i + direction + published.length) % published.length
-        ];
+        shuffle && choices.length
+          ? choices[Math.floor(Math.random() * choices.length)]
+          : published[(i + direction + published.length) % published.length];
     }
     void play(target);
   }
   nextRef.current = () => {
+    if (sleepTimer === "track") {
+      setSleepTimer(null);
+      setPlaying(false);
+      notify("Sleep timer finished. Your music is paused.");
+      return;
+    }
     if (repeat && current) {
       void play(current);
     } else move(1);
@@ -489,6 +531,70 @@ function useMusicState() {
       notify((e as Error).message);
     }
   }
+  async function followArtist(id: string) {
+    if (cloudMode && (!user || user.is_anonymous)) {
+      setAuthOpen(true);
+      return;
+    }
+    const enabled = !followedArtists.includes(id);
+    try {
+      if (cloudMode) await api("follow_artist", { artistId: id, enabled });
+      const next = enabled
+        ? [...followedArtists, id]
+        : followedArtists.filter((x) => x !== id);
+      if (!cloudMode) writeLocal("followed-artists", next);
+      setFollowedArtists(next);
+      notify(enabled ? "Artist added to your library." : "Artist unfollowed.");
+    } catch (e) {
+      notify((e as Error).message);
+    }
+  }
+  async function editPlaylist(id: string, name: string, description: string) {
+    const clean = name.trim();
+    if (!clean || clean.length > 80 || description.length > 300) {
+      notify("Use a name up to 80 characters and a description up to 300.");
+      return false;
+    }
+    try {
+      if (cloudMode)
+        await api("edit_playlist", { id, name: clean, description });
+      const next = playlists.map((p) =>
+        p.id === id ? { ...p, name: clean, description } : p,
+      );
+      if (!cloudMode) writeLocal("playlists", next);
+      setPlaylists(next);
+      notify("Playlist updated.");
+      return true;
+    } catch (e) {
+      notify((e as Error).message);
+      return false;
+    }
+  }
+  async function reorderPlaylist(id: string, trackIds: string[]) {
+    try {
+      if (cloudMode) await api("reorder_playlist", { id, trackIds });
+      const next = playlists.map((p) => (p.id === id ? { ...p, trackIds } : p));
+      if (!cloudMode) writeLocal("playlists", next);
+      setPlaylists(next);
+      return true;
+    } catch (e) {
+      notify((e as Error).message);
+      return false;
+    }
+  }
+  function playNext(t: Track) {
+    setQueue((q) => [t.id, ...q]);
+    notify(`“${t.title}” will play next.`);
+  }
+  function moveQueue(index: number, direction: number) {
+    setQueue((q) => {
+      const next = [...q],
+        to = index + direction;
+      if (to < 0 || to >= next.length) return q;
+      [next[index], next[to]] = [next[to], next[index]];
+      return next;
+    });
+  }
   async function deletePlaylist(id: string) {
     try {
       if (cloudMode) await api("delete_playlist", { id });
@@ -603,6 +709,103 @@ function useMusicState() {
     setQueue((q) => [...q, t.id]);
     notify("Added to your queue.");
   }
+  const mediaActions = useRef<
+    Record<string, (details: MediaSessionActionDetails) => void>
+  >({});
+  mediaActions.current = {
+    play: () => {
+      if (!adOpen && !playing) togglePlay();
+    },
+    pause: () => audio.current?.pause(),
+    nexttrack: () => {
+      if (!adOpen) move(1);
+    },
+    previoustrack: () => {
+      if (!adOpen) move(-1);
+    },
+    seekto: (d) => {
+      if (!adOpen && d.seekTime !== undefined) seek(d.seekTime);
+    },
+    seekforward: (d) => {
+      if (!adOpen)
+        seek((audio.current?.currentTime ?? 0) + (d.seekOffset ?? 10));
+    },
+    seekbackward: (d) => {
+      if (!adOpen)
+        seek((audio.current?.currentTime ?? 0) - (d.seekOffset ?? 10));
+    },
+  };
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    const actions: MediaSessionAction[] = [
+      "play",
+      "pause",
+      "nexttrack",
+      "previoustrack",
+      "seekto",
+      "seekforward",
+      "seekbackward",
+    ];
+    for (const action of actions) {
+      try {
+        navigator.mediaSession.setActionHandler(action, (d) =>
+          mediaActions.current[action]?.(d),
+        );
+      } catch {
+        /* Browser support varies by action. */
+      }
+    }
+    return () => {
+      for (const action of actions) {
+        try {
+          navigator.mediaSession.setActionHandler(action, null);
+        } catch {}
+      }
+      navigator.mediaSession.metadata = null;
+    };
+  }, []);
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    navigator.mediaSession.playbackState = adOpen
+      ? "none"
+      : playing
+        ? "playing"
+        : current
+          ? "paused"
+          : "none";
+  }, [playing, current, adOpen]);
+  useEffect(() => {
+    if (!("mediaSession" in navigator) || typeof MediaMetadata === "undefined")
+      return;
+    navigator.mediaSession.metadata =
+      current && !adOpen
+        ? new MediaMetadata({
+            title: current.title,
+            artist: current.artist,
+            album: current.album,
+            artwork: [{ src: new URL(current.cover, location.href).href }],
+          })
+        : null;
+  }, [current, adOpen]);
+  useEffect(() => {
+    if (
+      !("mediaSession" in navigator) ||
+      !navigator.mediaSession.setPositionState ||
+      !Number.isFinite(duration) ||
+      duration <= 0 ||
+      adOpen
+    )
+      return;
+    try {
+      navigator.mediaSession.setPositionState({
+        duration,
+        position: Math.max(0, Math.min(time, duration)),
+        playbackRate: 1,
+      });
+    } catch {
+      /* Position reporting is optional on older browsers. */
+    }
+  }, [time, duration, adOpen]);
   return {
     tracks,
     artists,
@@ -657,6 +860,15 @@ function useMusicState() {
     removeTrack,
     updateTrack,
     addQueue,
+    followedArtists,
+    followArtist,
+    editPlaylist,
+    reorderPlaylist,
+    playNext,
+    moveQueue,
+    sleepTimer,
+    setSleep,
+    clock,
   };
 }
 type MusicState = ReturnType<typeof useMusicState>;

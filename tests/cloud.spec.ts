@@ -117,3 +117,17 @@ test("cloud catalogue errors remain errors and never fall back to the demo", asy
   );
   await expect(page.locator(".track-card")).toHaveCount(0);
 });
+
+test("following an artist in cloud mode requires a registered account", async ({
+  page,
+}) => {
+  await page.goto("/#/artist/artist-0");
+  await page
+    .getByRole("button", { name: "Follow artist", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  await expect(page.getByLabel("Email address")).toBeVisible();
+  expect(
+    await page.evaluate(() => localStorage.getItem("horicx:followed-artists")),
+  ).toBeNull();
+});

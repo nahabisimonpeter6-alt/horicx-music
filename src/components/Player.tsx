@@ -1,6 +1,9 @@
 import {
-  AudioLines,
+  ArrowUp,
+  ArrowDown,
+  Moon,
   Check,
+  AudioLines,
   ChevronDown,
   Heart,
   ListMusic,
@@ -20,9 +23,11 @@ import {
 import { useState } from "react";
 import { useMusic, formatTime } from "../store";
 import { navigate } from "../App";
+import { Modal } from "./Modals";
 export function Player() {
   const m = useMusic();
   const [expanded, setExpanded] = useState(false);
+  const [timerOpen, setTimerOpen] = useState(false);
   const track = m.current ?? m.tracks.find((t) => t.published);
   return (
     <>
@@ -153,10 +158,29 @@ export function Player() {
           <button
             className={`icon-button ${m.queueOpen ? "enabled" : ""}`}
             aria-label="Open queue"
-            onClick={() => m.setQueueOpen(!m.queueOpen)}
+            onClick={() => {
+              m.setQueueOpen(!m.queueOpen);
+              setExpanded(false);
+            }}
           >
             <ListMusic size={19} />
             {m.queue.length > 0 && <span className="queue-dot" />}
+          </button>
+          <button
+            className={`icon-button sleep-control ${m.sleepTimer !== null ? "enabled" : ""}`}
+            aria-label="Sleep timer"
+            title={
+              m.sleepTimer === null
+                ? "Sleep timer"
+                : m.sleepTimer === "track"
+                  ? "Sleep timer: end of track"
+                  : `Sleep timer: ${formatTime(Math.max(0, (m.sleepTimer - m.clock) / 1000))} remaining`
+            }
+            aria-pressed={m.sleepTimer !== null}
+            onClick={() => setTimerOpen(true)}
+          >
+            <Moon size={18} />
+            {m.sleepTimer !== null && <span className="queue-dot" />}
           </button>
           <span className="player-divider" />
           <button
@@ -252,6 +276,7 @@ export function Player() {
               return t ? (
                 <div className="queue-track" key={`${id}-${i}`}>
                   <button
+                    aria-label={`Play queued ${t.title}`}
                     onClick={() => {
                       m.setQueue((q) => q.filter((_, j) => j !== i));
                       void m.play(t);
@@ -262,6 +287,24 @@ export function Player() {
                   <div>
                     <strong>{t.title}</strong>
                     <span>{t.artist}</span>
+                  </div>
+                  <div className="queue-reorder">
+                    <button
+                      className="icon-button"
+                      aria-label={`Move ${t.title} up in queue`}
+                      disabled={i === 0}
+                      onClick={() => m.moveQueue(i, -1)}
+                    >
+                      <ArrowUp size={14} />
+                    </button>
+                    <button
+                      className="icon-button"
+                      aria-label={`Move ${t.title} down in queue`}
+                      disabled={i === m.queue.length - 1}
+                      onClick={() => m.moveQueue(i, 1)}
+                    >
+                      <ArrowDown size={14} />
+                    </button>
                   </div>
                   <button
                     className="icon-button"
@@ -283,6 +326,70 @@ export function Player() {
             </div>
           )}
         </aside>
+      )}
+      {timerOpen && (
+        <Modal
+          title="A softer end to your day."
+          onClose={() => setTimerOpen(false)}
+        >
+          <p className="modal-subtitle">
+            Let the music drift off when you do. Your timer works across pages
+            while this app is open.
+          </p>
+          {m.sleepTimer !== null && (
+            <div className="timer-current">
+              <Moon size={20} />
+              <div>
+                <strong>
+                  {m.sleepTimer === "track"
+                    ? "At the end of this track"
+                    : `${formatTime(Math.max(0, (m.sleepTimer - m.clock) / 1000))} remaining`}
+                </strong>
+                <span>Music will pause automatically</span>
+              </div>
+            </div>
+          )}
+          <div className="timer-options">
+            {[5, 15, 30, 60].map((minutes) => (
+              <button
+                key={minutes}
+                onClick={() => {
+                  m.setSleep(minutes);
+                  setTimerOpen(false);
+                }}
+              >
+                <Moon size={16} />
+                <span>{minutes} minutes</span>
+                <span className="timer-choice-arrow" aria-hidden="true">
+                  →
+                </span>
+              </button>
+            ))}
+            <button
+              disabled={!m.current}
+              onClick={() => {
+                m.setSleep("track");
+                setTimerOpen(false);
+              }}
+            >
+              <AudioLines size={17} />
+              <span>End of this track</span>
+              {m.sleepTimer === "track" && <Check size={16} />}
+            </button>
+            {m.sleepTimer !== null && (
+              <button
+                className="cancel-timer"
+                onClick={() => {
+                  m.setSleep(null);
+                  setTimerOpen(false);
+                }}
+              >
+                <X size={17} />
+                <span>Cancel sleep timer</span>
+              </button>
+            )}
+          </div>
+        </Modal>
       )}
     </>
   );

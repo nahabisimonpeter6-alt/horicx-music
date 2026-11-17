@@ -23,6 +23,7 @@ let migration=await readFile(new URL('../supabase/migrations/202611140001_horicx
 // gen_random_uuid is built into PostgreSQL. PGlite does not ship the pgcrypto extension.
 migration=migration.replace('create extension if not exists pgcrypto;','');
 await db.exec(migration);
+await db.exec(await readFile(new URL('../supabase/migrations/202611170001_listening_features.sql',import.meta.url),'utf8'));
 const u1='11111111-1111-4111-8111-111111111111',u2='22222222-2222-4222-8222-222222222222',owner='33333333-3333-4333-8333-333333333333',guest='44444444-4444-4444-8444-444444444444';
 await db.exec(`insert into auth.users(id,email) values('${u1}','a@example.test'),('${u2}','b@example.test'),('${owner}','owner@example.test');insert into auth.users(id,is_anonymous) values('${guest}',true);insert into public.admin_roles(user_id) values('${owner}');`);
 const artist=(await sql("insert into artists(name) values('Original Artist') returning id")).rows[0].id;
@@ -32,7 +33,7 @@ await sql("insert into track_media(track_id,audio_path) values($1,'private/song.
 const ad=(await sql("insert into adverts(title,duration,active) values('Test advert',8,true) returning id")).rows[0].id;
 await sql("insert into storage.objects(bucket_id,name) values('music','private/song.mp3')");
 async function as(role,id='',anonymous=false){await db.exec('reset role');await sql("select set_config('request.jwt.claim.sub',$1,false)",[id]);await sql("select set_config('request.jwt.claims',$1,false)",[JSON.stringify({sub:id,is_anonymous:anonymous})]);await db.exec(`set role ${role}`);}
-await ok('migration applies and all 16 application tables enable RLS',async()=>{const r=await sql("select relname from pg_class join pg_namespace n on n.oid=relnamespace where n.nspname='public' and relkind='r' and not relrowsecurity");assert.equal(r.rows.length,0);});
+await ok('migration applies and all 17 application tables enable RLS',async()=>{const r=await sql("select relname from pg_class join pg_namespace n on n.oid=relnamespace where n.nspname='public' and relkind='r' and not relrowsecurity");assert.equal(r.rows.length,0);});
 await ok('profile trigger creates real and guest profiles',async()=>{assert.equal((await sql('select count(*)::int n from profiles')).rows[0].n,4);assert.equal((await sql('select is_anonymous from profiles where id=$1',[guest])).rows[0].is_anonymous,true);});
 await as('anon');
 await ok('unauthenticated browse sees published catalogue only',async()=>assert.deepEqual((await sql('select title from tracks')).rows,[{title:'Published'}]));
@@ -69,4 +70,23 @@ await ok('heartbeats with implausible gaps are rejected',async()=>{const s=await
 await ok('complete progress creates exactly one listening pass; reuse fails',async()=>{const s=await session();await sql("update advert_sessions set started_at=now()-interval '8 seconds',last_seen_at=now()-interval '2 seconds',last_position=6,observed_seconds=6,progress_checks=3 where id=$1",[s]);await sql('select record_ad_progress($1,$2,8)',[u1,s]);const result=await sql('select complete_ad_session($1,$2) expiry',[u1,s]);assert.ok(Date.parse(result.rows[0].expiry)>Date.now()+29*60000);await rejects(`select complete_ad_session('${u1}','${s}')`,/invalid, expired, or already used/);assert.equal((await sql('select count(*)::int n from listening_passes where session_id=$1',[s])).rows[0].n,1);});
 await ok('fixed-window rate limits reject requests above the limit',async()=>{assert.equal((await sql("select consume_rate_limit('test-limit',2) ok")).rows[0].ok,true);assert.equal((await sql("select consume_rate_limit('test-limit',2) ok")).rows[0].ok,true);assert.equal((await sql("select consume_rate_limit('test-limit',2) ok")).rows[0].ok,false);});
 await ok('private buckets have strict size caps and MIME allowlists',async()=>{const buckets=(await sql('select * from storage.buckets')).rows;assert.equal(buckets.length,3);assert.ok(buckets.every(b=>!b.public&&b.file_size_limit<=31457280&&b.allowed_mime_types.length>0));});
+
+await as('authenticated',u1);
+await ok('registered listener may follow artists in their own library',async()=>{await sql('insert into artist_follows(user_id,artist_id) values($1,$2)',[u1,artist]);assert.equal((await sql('select * from artist_follows')).rows.length,1);});
+await as('authenticated',u2);
+await ok('followed artists stay private to their owner',async()=>assert.equal((await sql('select * from artist_follows')).rows.length,0));
+await ok('a listener cannot follow an artist on behalf of another account',async()=>rejects(`insert into artist_follows(user_id,artist_id) values('${u1}','${artist}')`,/row-level security/));
+await ok('listeners cannot invoke the privileged playlist-order RPC',async()=>rejects(`select reorder_playlist('${u1}','${playlist}',array['${track}']::uuid[])`,/permission denied/));
+await as('authenticated',guest,true);
+await ok('anonymous sessions cannot save artist follows',async()=>rejects(`insert into artist_follows(user_id,artist_id) values('${guest}','${artist}')`,/row-level security/));
+await as('service_role');
+const otherTrack=(await sql("insert into tracks(title,artist_id,genre,duration,published) values('Second track',$1,'Chill',15,true) returning id",[artist])).rows[0].id;
+await ok('new playlist additions append after the existing track',async()=>{await sql('select set_playlist_track($1,$2,$3,true)',[u1,playlist,otherTrack]);const ids=(await sql('select track_id from playlist_tracks where playlist_id=$1 order by position',[playlist])).rows.map(x=>x.track_id);assert.deepEqual(ids,[track,otherTrack]);});
+await ok('owner playlist reorder is atomic and preserves every track',async()=>{await sql('select reorder_playlist($1,$2,$3::uuid[])',[u1,playlist,[otherTrack,track]]);assert.deepEqual((await sql('select track_id from playlist_tracks where playlist_id=$1 order by position',[playlist])).rows.map(x=>x.track_id),[otherTrack,track]);});
+await ok('playlist reorder rejects another owner, incomplete lists and duplicates',async()=>{await rejects(`select reorder_playlist('${u2}','${playlist}',array['${track}','${otherTrack}']::uuid[])`,/does not belong/);await rejects(`select reorder_playlist('${u1}','${playlist}',array['${track}']::uuid[])`,/playlist changed/);await rejects(`select reorder_playlist('${u1}','${playlist}',array['${track}','${track}']::uuid[])`,/playlist changed/);});
+await ok('playlist mutations reject a foreign owner and unpublished tracks',async()=>{await rejects(`select set_playlist_track('${u2}','${playlist}','${track}',false)`,/does not belong/);const draft=(await sql("select id from tracks where title='Draft'")).rows[0].id;await rejects(`select set_playlist_track('${u1}','${playlist}','${draft}',true)`,/unavailable/);});
+await as('authenticated',u2);
+await ok('another account cannot rename or describe a private playlist',async()=>{await sql(`update playlists set name='Stolen',description='Bad edit' where id='${playlist}'`);await as('service_role');assert.equal((await sql('select name from playlists where id=$1',[playlist])).rows[0].name,'My songs');});
+await as('authenticated',u1);
+await ok('playlist owners can save a name and description',async()=>{await sql(`update playlists set name='My new mix',description='For late nights' where id='${playlist}'`);assert.equal((await sql('select description from playlists where id=$1',[playlist])).rows[0].description,'For late nights');});
 console.log(`\n${assertions} PostgreSQL migration, RLS and advert-security checks passed.`);await db.close();

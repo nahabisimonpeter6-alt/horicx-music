@@ -1,6 +1,17 @@
 # Horicx Music
 
-A working music streaming app built with React, Vite, TypeScript, Tailwind CSS and Lucide. It starts immediately with six original instrumental demos, original artwork and an eight-second local advert. The production backend is provided as a Supabase migration and Edge Function. No OpenAI API, paid music API or third-party advert network is required.
+A working music streaming app built with React, Vite, TypeScript, Tailwind CSS and Lucide. It starts immediately with six original instrumental demos, original artwork and an eight-second local advert. The production backend is provided as Supabase migrations and an Edge Function. No OpenAI API, paid music API or third-party advert network is required.
+
+## New listening features
+
+- **Made for you:** Daily Mix uses your actual likes, recent listening and followed artists. Slow it down and Turn it up select published songs by mood/genre. Open a mix to see its tracks and play the ordered queue. After listening, Jump back in provides recent-song shortcuts.
+- **Artist following:** Open an artist page and choose Follow artist. Find followed artists in Your library. Demo follows stay in this browser; connected cloud follows are private to your registered account.
+- **Editable playlists:** Use Edit playlist to change its name and description. Covers form a mosaic from the songs in the playlist. Find in this collection filters by title, artist or genre; Sort by supports title, artist and duration. In Custom order with an empty search, use a song's options menu → Move up / Move down to save the order.
+- **Play next and queue order:** Song options include Play next and Add to queue. Open the queue and use its up/down buttons to reorder upcoming songs. Shuffle avoids immediately choosing the currently playing track when another track exists.
+- **Sleep timer:** Choose the moon icon in the player (expand the player on mobile) to pause music after 5, 15, 30 or 60 minutes, or at the end of the current track. End-of-track timers take priority over repeat. Cancel it from the same menu. Timers belong to the open tab and clear on reload; a suspended browser may process a deadline when it resumes.
+- **Device media controls:** Supported browsers receive current track/artist/artwork and play/pause, next/previous and seek handlers through the Media Session API. Availability of lock-screen and hardware controls depends on the browser and device. See the [Media Session specification](https://www.w3.org/TR/mediasession/).
+
+**For an existing cloud installation:** apply the new `202611170001_listening_features.sql` migration with `npx supabase db push`, then redeploy `music-api` before deploying this frontend. It adds private artist follows, playlist descriptions, saved track positions and service-only atomic reorder/membership functions. Existing playlist membership and initial order are preserved. New demo features require no backend configuration.
 
 ## Run it locally
 
@@ -49,7 +60,7 @@ Demo state is scoped to the origin and browser. Clearing site data deletes local
    npx supabase db push
    ```
 
-   This applies `supabase/migrations/202611140001_horicx.sql`. Alternatively, paste that migration into the project's SQL Editor once. It creates the tables, indexes, policies, private buckets and server-only functions. Use a new project or review existing table names before applying.
+   This applies both files in `supabase/migrations/` in filename order. Alternatively, run `202611140001_horicx.sql` followed by `202611170001_listening_features.sql` in the project's SQL Editor once each. It creates the tables, indexes, policies, private buckets and server-only functions. Use a new project or review existing table names before applying.
 3. In **Authentication → Sign In / Providers**, enable Email and **Anonymous Sign-Ins**. Anonymous sessions allow visitors to watch an advert and listen without creating an email account. Favourites and playlists still require a registered account. Supabase's built-in anonymous sign-in limits apply; configure CAPTCHA/rate limits for your expected audience as you scale.
 4. In Auth URL configuration, set the Site URL to your frontend URL and add `http://localhost:5173` and your production frontend URL to allowed redirects. Enable email confirmation. For a public launch, configure your own SMTP sender in Supabase so confirmation emails are reliably delivered beyond the development email limits.
 5. Configure the allowed frontend origins, then deploy the Edge Function:
@@ -140,7 +151,7 @@ npx deno test --no-config --node-modules-dir=none --allow-env tests/edge.test.ts
 npm audit
 ```
 
-The browser suite exercises original media loading, real-time demo advert completion, interrupted adverts, playback continuity, seek/volume/transport controls, favourites/playlists, detail navigation, local MP3 and video uploads, publication/edit/deletion, listening settings, missing-ad recovery and 320/360/390/768 px layouts. `test:security` applies the actual migration to embedded PostgreSQL (PGlite), with test doubles for Supabase's `auth` and `storage` schemas, and tests RLS, private metadata, role escalation prevention, ownership, premature/expired/reused advert sessions, rate limits and private bucket constraints. The additional cloud UI tests use explicit mock responses to verify sign-in guards and honest cloud failure states. The Edge request-handler tests use mocked Supabase HTTP responses to verify CORS, body limits, authentication, admin rejection, rate limits and denial of fabricated client passes. These do not substitute for deployed Supabase integration tests.
+The browser suite exercises original media loading, real-time demo advert completion, interrupted adverts, playback continuity, seek/volume/transport controls, favourites/playlists, detail navigation, local MP3 and video uploads, publication/edit/deletion, listening settings, missing-ad recovery and 320/360/390/768 px layouts. `test:security` applies both actual migrations to embedded PostgreSQL (PGlite), with test doubles for Supabase's `auth` and `storage` schemas, and tests RLS, private metadata, role escalation prevention, ownership, premature/expired/reused advert sessions, rate limits and private bucket constraints. The additional cloud UI tests use explicit mock responses to verify sign-in guards and honest cloud failure states. The Edge request-handler tests use mocked Supabase HTTP responses to verify CORS, body limits, authentication, admin rejection, rate limits and denial of fabricated client passes. These do not substitute for deployed Supabase integration tests.
 
 **Requires your account configuration:** deployed Supabase Auth/email delivery, real Storage HTTP policies, Edge gateway/CORS, end-to-end signed playback and cloud uploads cannot be verified against your project without your Supabase project and credentials. No real cloud project or administrator account has been invented or provisioned. See `VALIDATION.md` for results from this build.
 

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import {
+  ArrowDown,
+  ArrowUp,
   ArrowLeft,
   ArrowRight,
   ArrowUpRight,
@@ -35,6 +37,14 @@ import type { Track } from "./lib/types";
 import { Player } from "./components/Player";
 import { AdModal, AuthModal, Modal } from "./components/Modals";
 import { Admin } from "./components/Admin";
+import { DiscoveryShelf, MixPage } from "./components/Discovery";
+import {
+  CollectionControls,
+  PlaylistArtwork,
+  PlaylistTools,
+  sortTracks,
+} from "./components/PlaylistTools";
+import type { Playlist } from "./lib/types";
 export function navigate(path: string) {
   location.hash = path;
 }
@@ -107,8 +117,30 @@ export function TrackCard({ track }: { track: Track }) {
     </article>
   );
 }
-export function TrackTable({ tracks }: { tracks: Track[] }) {
+export function TrackTable({
+  tracks,
+  playlist,
+  allowReorder = false,
+}: {
+  tracks: Track[];
+  playlist?: Playlist;
+  allowReorder?: boolean;
+}) {
   const m = useMusic();
+  const [ordering, setOrdering] = useState(false);
+  async function moveTrack(track: Track, index: number, direction: number) {
+    if (!playlist || ordering || !tracks[index + direction]) return;
+    const order = [...playlist.trackIds],
+      a = order.indexOf(track.id),
+      b = order.indexOf(tracks[index + direction].id);
+    [order[a], order[b]] = [order[b], order[a]];
+    setOrdering(true);
+    try {
+      await m.reorderPlaylist(playlist.id, order);
+    } finally {
+      setOrdering(false);
+    }
+  }
   return (
     <div className="track-table">
       <div className="table-head">
@@ -175,6 +207,30 @@ export function TrackTable({ tracks }: { tracks: Track[] }) {
                 <MoreHorizontal size={18} />
               </summary>
               <div className="dropdown">
+                <button onClick={() => m.playNext(t)}>
+                  <Play size={15} />
+                  Play next
+                </button>
+                {playlist && allowReorder && (
+                  <>
+                    <button
+                      aria-label={`Move ${t.title} up`}
+                      disabled={ordering || i === 0}
+                      onClick={() => void moveTrack(t, i, -1)}
+                    >
+                      <ArrowUp size={15} />
+                      Move up
+                    </button>
+                    <button
+                      aria-label={`Move ${t.title} down`}
+                      disabled={ordering || i === tracks.length - 1}
+                      onClick={() => void moveTrack(t, i, 1)}
+                    >
+                      <ArrowDown size={15} />
+                      Move down
+                    </button>
+                  </>
+                )}
                 <button onClick={() => m.addQueue(t)}>
                   <ListMusic size={15} /> Add to queue
                 </button>
@@ -355,6 +411,7 @@ function HomePage() {
           <span className="hero-caption">SOUNDTRACK YOUR OWN WORLD.</span>
         </section>
       )}
+      {filter === "For you" && <DiscoveryShelf />}
       <section className="music-section">
         <SectionTitle
           eyebrow="GOOD MUSIC FINDS A WAY"
@@ -615,6 +672,12 @@ function LibraryPage({
   onCreate: () => void;
 }) {
   const m = useMusic();
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState("default");
+  useEffect(() => {
+    setQuery("");
+    setSort("default");
+  }, [route]);
   const isLiked = route === "/liked";
   const isRecent = route === "/recent";
   const playlist = m.playlists.find((p) => route === `/playlist/${p.id}`);
@@ -623,6 +686,7 @@ function LibraryPage({
     ids
       ?.map((id) => m.tracks.find((t) => t.id === id && t.published))
       .filter((t): t is Track => !!t) ?? [];
+  const displayed = sortTracks(tracks, sort, query);
   return (
     <>
       <div className="page-heading library-heading">
@@ -631,6 +695,8 @@ function LibraryPage({
             <Heart size={60} fill="currentColor" />
           ) : isRecent ? (
             <Clock3 size={60} />
+          ) : playlist ? (
+            <PlaylistArtwork playlist={playlist} />
           ) : (
             <ListMusic size={60} />
           )}
@@ -651,6 +717,9 @@ function LibraryPage({
               ? `${tracks.length} tracks · ${cloudMode ? "Saved to your account" : "Saved in this browser"}`
               : "A little space for all the sounds you love."}
           </p>
+          {playlist?.description && (
+            <p className="playlist-description">{playlist.description}</p>
+          )}
         </div>
       </div>
       {cloudMode && (!m.user || m.user.is_anonymous) && (
@@ -677,6 +746,7 @@ function LibraryPage({
             >
               <Play size={17} fill="currentColor" /> Play collection
             </button>
+            {playlist && <PlaylistTools playlist={playlist} />}
             {playlist && (
               <button
                 className="button secondary"
@@ -689,8 +759,28 @@ function LibraryPage({
               </button>
             )}
           </div>
+          {tracks.length > 0 && (
+            <CollectionControls
+              query={query}
+              setQuery={setQuery}
+              sort={sort}
+              setSort={setSort}
+              custom={!!playlist}
+            />
+          )}
           {tracks.length ? (
-            <TrackTable tracks={tracks} />
+            displayed.length ? (
+              <TrackTable
+                tracks={displayed}
+                playlist={playlist}
+                allowReorder={sort === "default" && !query}
+              />
+            ) : (
+              <div className="collection-no-results">
+                No matching tracks in this collection. Try another title or
+                artist.
+              </div>
+            )
           ) : (
             <Empty
               title={
@@ -732,7 +822,7 @@ function LibraryPage({
                 onClick={() => navigate(`/playlist/${p.id}`)}
               >
                 <div className="collection-picture">
-                  <ListMusic size={45} />
+                  <PlaylistArtwork playlist={p} />
                 </div>
                 <strong>{p.name}</strong>
                 <span>{p.trackIds.length} tracks</span>
@@ -749,6 +839,40 @@ function LibraryPage({
               <span>Start with a feeling</span>
             </button>
           </div>
+          <section className="music-section followed-section">
+            <SectionTitle title="Artists you follow" />
+            {m.followedArtists.length ? (
+              <div className="followed-grid">
+                {m.artists
+                  .filter((a) => m.followedArtists.includes(a.id))
+                  .map((a) => (
+                    <button
+                      className="followed-artist"
+                      key={a.id}
+                      onClick={() => navigate(`/artist/${a.id}`)}
+                    >
+                      <img src={a.cover || "/art/artist-0.svg"} alt="" />
+                      <strong>{a.name}</strong>
+                      <span>Following</span>
+                    </button>
+                  ))}
+              </div>
+            ) : (
+              <div className="followed-empty">
+                <Users size={25} />
+                <div>
+                  <strong>Keep your favourite artists close.</strong>
+                  <p>Follow an artist from their page to find them here.</p>
+                </div>
+                <button
+                  className="text-link"
+                  onClick={() => navigate("/artists")}
+                >
+                  Find artists <ArrowRight size={14} />
+                </button>
+              </div>
+            )}
+          </section>
         </>
       )}
     </>
@@ -813,6 +937,22 @@ function DetailPage({ route }: { route: string }) {
             >
               <Play size={18} fill="currentColor" /> Listen now
             </button>
+            {isArtist && artist && (
+              <button
+                className={`button secondary follow-button ${m.followedArtists.includes(artist.id) ? "following" : ""}`}
+                aria-pressed={m.followedArtists.includes(artist.id)}
+                onClick={() => void m.followArtist(artist.id)}
+              >
+                {m.followedArtists.includes(artist.id) ? (
+                  <Check size={17} />
+                ) : (
+                  <Plus size={17} />
+                )}{" "}
+                {m.followedArtists.includes(artist.id)
+                  ? "Following"
+                  : "Follow artist"}
+              </button>
+            )}
             {track && (
               <button
                 className="button secondary"
@@ -1186,6 +1326,8 @@ export default function App() {
                 ))}
               </div>
             </>
+          ) : route.startsWith("/mix/") ? (
+            <MixPage id={route.split("/")[2] ?? ""} />
           ) : route.startsWith("/artist/") || route.startsWith("/track/") ? (
             <DetailPage route={route} />
           ) : ["/library", "/liked", "/recent"].includes(route) ||

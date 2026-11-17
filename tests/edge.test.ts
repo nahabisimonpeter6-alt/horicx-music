@@ -27,6 +27,7 @@ globalThis.fetch = ((input: RequestInfo | URL) => {
       : json({
           id: listener,
           aud: "authenticated",
+          is_anonymous: scenario === "guest",
           email: "listener@example.test",
           app_metadata: {},
           user_metadata: {},
@@ -35,6 +36,7 @@ globalThis.fetch = ((input: RequestInfo | URL) => {
   if (url.pathname === "/rest/v1/rpc/consume_rate_limit")
     return json(scenario !== "limited");
   if (
+    url.pathname === "/rest/v1/playlists" ||
     url.pathname === "/rest/v1/admin_roles" ||
     url.pathname === "/rest/v1/listening_passes"
   )
@@ -178,6 +180,47 @@ Deno.test(
   async () => {
     const r = await handler(request("library"));
     assert.equal(r.headers.get("Cache-Control"), "no-store");
+    await r.body?.cancel();
+  },
+);
+Deno.test("a guest cannot follow artists with a cloud library", async () => {
+  scenario = "guest";
+  try {
+    const r = await handler(
+      request("follow_artist", {
+        token: "guest-fixture",
+        extra: { artistId: crypto.randomUUID(), enabled: true },
+      }),
+    );
+    assert.equal(r.status, 403);
+    await r.body?.cancel();
+  } finally {
+    scenario = "listener";
+  }
+});
+Deno.test(
+  "a listener cannot edit a playlist owned by someone else",
+  async () => {
+    const r = await handler(
+      request("edit_playlist", {
+        token: "listener-fixture",
+        extra: { id: crypto.randomUUID(), name: "Stolen", description: "Bad" },
+      }),
+    );
+    assert.equal(r.status, 404);
+    await r.body?.cancel();
+  },
+);
+Deno.test(
+  "a listener cannot reorder a playlist owned by someone else",
+  async () => {
+    const r = await handler(
+      request("reorder_playlist", {
+        token: "listener-fixture",
+        extra: { id: crypto.randomUUID(), trackIds: [] },
+      }),
+    );
+    assert.equal(r.status, 404);
     await r.body?.cancel();
   },
 );

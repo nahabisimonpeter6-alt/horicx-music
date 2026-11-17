@@ -55,6 +55,9 @@ export function Admin() {
   const [minutes, setMinutes] = useState(m.listenMinutes);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [pendingAdStatus, setPendingAdStatus] = useState<
+    Record<string, boolean>
+  >({});
   async function run(fn: () => Promise<void>, message: string) {
     setError("");
     setBusy(true);
@@ -68,27 +71,39 @@ export function Admin() {
     }
   }
   async function changeAd(a: Advert) {
-    await run(async () => {
-      if (cloudMode)
-        await api("admin_update_advert", {
-          advert: {
-            id: a.id,
-            title: a.title,
+    setPendingAdStatus((p) => ({ ...p, [a.id]: a.active }));
+    try {
+      await run(async () => {
+        if (cloudMode)
+          await api("admin_update_advert", {
+            advert: {
+              id: a.id,
+              title: a.title,
+              active: a.active,
+              position: a.position,
+            },
+          });
+        else if (a.id === "demo-advert")
+          writeLocal("demo-ad-edit", {
             active: a.active,
             position: a.position,
-          },
-        });
-      else if (a.id === "demo-advert")
-        writeLocal("demo-ad-edit", { active: a.active, position: a.position });
-      else
-        writeLocal(
-          "adverts",
-          readLocal<Advert[]>("adverts", []).map((x) =>
-            x.id === a.id ? { ...a, url: undefined } : x,
-          ),
-        );
-      await m.refresh();
-    }, "Advert updated.");
+          });
+        else
+          writeLocal(
+            "adverts",
+            readLocal<Advert[]>("adverts", []).map((x) =>
+              x.id === a.id ? { ...a, url: undefined } : x,
+            ),
+          );
+        await m.refresh();
+      }, "Advert updated.");
+    } finally {
+      setPendingAdStatus((p) => {
+        const next = { ...p };
+        delete next[a.id];
+        return next;
+      });
+    }
   }
   if (cloudMode && !m.isAdmin)
     return (
@@ -475,7 +490,7 @@ export function Admin() {
                     <label className="toggle-label">
                       <input
                         type="checkbox"
-                        checked={a.active}
+                        checked={pendingAdStatus[a.id] ?? a.active}
                         disabled={busy}
                         onChange={() =>
                           void changeAd({ ...a, active: !a.active })

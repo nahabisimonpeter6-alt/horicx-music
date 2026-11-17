@@ -31,7 +31,12 @@ export type Advert = {
   position: number;
   local?: boolean;
 };
-export type Playlist = { id: string; name: string; trackIds: string[] };
+export type Playlist = {
+  id: string;
+  name: string;
+  trackIds: string[];
+  description?: string;
+};
 export type Stats = {
   songs: number;
   users: number | null;

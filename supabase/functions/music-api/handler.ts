@@ -351,7 +351,7 @@ async function handle(req: Request) {
     await limit(`${user.id}:admin`, 90);
   }
   if (action === "library") {
-    const [roles, favs, lists, events, pass] = await Promise.all([
+    const [roles, favs, lists, events, pass, follows] = await Promise.all([
       service
         .from("admin_roles")
         .select("user_id")
@@ -360,7 +360,9 @@ async function handle(req: Request) {
       service.from("favourites").select("track_id").eq("user_id", user.id),
       service
         .from("playlists")
-        .select("id,name,playlist_tracks(track_id,added_at)")
+        .select(
+          "id,name,description,playlist_tracks(track_id,added_at,position)",
+        )
         .eq("user_id", user.id)
         .order("created_at"),
       service
@@ -379,15 +381,21 @@ async function handle(req: Request) {
         })
         .limit(1)
         .maybeSingle(),
+      service.from("artist_follows").select("artist_id").eq("user_id", user.id),
     ]);
     return {
       admin: !!check(roles),
+      followedArtists: rows(follows).map((f) => f.artist_id),
       favourites: rows(favs).map((x) => x.track_id),
       playlists: rows(lists).map((p) => ({
         id: p.id,
         name: p.name,
+        description: p.description,
         trackIds: p.playlist_tracks
-          .sort((a, b) => a.added_at.localeCompare(b.added_at))
+          .sort(
+            (a, b) =>
+              a.position - b.position || a.added_at.localeCompare(b.added_at),
+          )
           .map((t) => t.track_id),
       })),
       recent: [...new Set(rows(events).map((e) => e.track_id))].slice(0, 30),
@@ -543,6 +551,78 @@ async function handle(req: Request) {
     }
     return { ok: true };
   }
+  if (action === "follow_artist") {
+    member(user);
+    const artistId = uuid(body.artistId);
+    if (typeof body.enabled !== "boolean")
+      throw new HttpError(400, "Expected a boolean.");
+    if (body.enabled) {
+      const artist = check(
+        await service
+          .from("artists")
+          .select("id")
+          .eq("id", artistId)
+          .maybeSingle(),
+      );
+      if (!artist) throw new HttpError(404, "This artist is unavailable.");
+      check(
+        await service
+          .from("artist_follows")
+          .upsert({ user_id: user.id, artist_id: artistId }),
+      );
+    } else
+      check(
+        await service
+          .from("artist_follows")
+          .delete()
+          .eq("user_id", user.id)
+          .eq("artist_id", artistId),
+      );
+    return { ok: true };
+  }
+  if (action === "edit_playlist" || action === "reorder_playlist") {
+    member(user);
+    const id = uuid(body.id);
+    const owned = check(
+      await service
+        .from("playlists")
+        .select("id")
+        .eq("id", id)
+        .eq("user_id", user.id)
+        .maybeSingle(),
+    );
+    if (!owned)
+      throw new HttpError(
+        404,
+        "This playlist does not belong to your account.",
+      );
+    if (action === "edit_playlist")
+      check(
+        await service
+          .from("playlists")
+          .update({
+            name: required(body.name, 80),
+            description: text(body.description, 300),
+          })
+          .eq("id", id)
+          .eq("user_id", user.id),
+      );
+    else {
+      if (!Array.isArray(body.trackIds) || body.trackIds.length > 1000)
+        throw new HttpError(400, "Invalid playlist order.");
+      const ids = body.trackIds.map(uuid);
+      if (new Set(ids).size !== ids.length)
+        throw new HttpError(400, "The playlist order contains duplicates.");
+      check(
+        await service.rpc("reorder_playlist", {
+          p_user: user.id,
+          p_playlist: id,
+          p_tracks: ids,
+        }),
+      );
+    }
+    return { ok: true };
+  }
   if (action === "create_playlist") {
     member(user);
     await limit(`${user.id}:create_playlist`, 10);
@@ -588,31 +668,14 @@ async function handle(req: Request) {
       if (typeof body.enabled !== "boolean") {
         throw new HttpError(400, "Expected a boolean.");
       }
-      if (body.enabled) {
-        const t = check(
-          await service
-            .from("tracks")
-            .select("id")
-            .eq("id", tid)
-            .eq("published", true)
-            .maybeSingle(),
-        );
-        if (!t) throw new HttpError(404, "This track is unavailable.");
-        check(
-          await service.from("playlist_tracks").upsert({
-            playlist_id: id,
-            track_id: tid,
-          }),
-        );
-      } else {
-        check(
-          await service
-            .from("playlist_tracks")
-            .delete()
-            .eq("playlist_id", id)
-            .eq("track_id", tid),
-        );
-      }
+      check(
+        await service.rpc("set_playlist_track", {
+          p_user: user.id,
+          p_playlist: id,
+          p_track: tid,
+          p_enabled: body.enabled,
+        }),
+      );
     }
     return { ok: true };
   }
